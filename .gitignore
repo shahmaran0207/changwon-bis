@@ -1,0 +1,21 @@
+# 디폴트 무시된 파일
+/.idea
+/shelf/
+/.idea/workspace.xml
+# 에디터 기반 HTTP 클라이언트 요청
+/httpRequests/
+# 쿼리 파일을 포함한 무시된 디폴트 폴더
+/queries/
+# Datasource local storage ignored files
+/dataSources/
+/dataSources.local.xml
+
+# 환경변수/API 키
+.env
+.env.*
+!.env.example
+
+# 원본 교통 데이터(대용량, 재생성 가능) - 집계 결과물만 추적
+data/*.zip
+data/*.csv
+!data/agg_link_speed_summary.csv
