@@ -28,14 +28,14 @@ TAGO API 의존도가 높고, 나중에 다른 도시/다른 데이터 소스로
 CREATE TABLE route (
     id                 BIGSERIAL PRIMARY KEY,         -- 서러게이트 키
     external_route_id  VARCHAR(30) UNIQUE NOT NULL,   -- TAGO routeId (자연키 보존)
-    city_code          SMALLINT NOT NULL,
+    city_code          INTEGER NOT NULL,              -- 창원=38010 등, SMALLINT 범위 초과라 INTEGER
     route_no           VARCHAR(10) NOT NULL
 );
 
 CREATE TABLE stop (
     id                 BIGSERIAL PRIMARY KEY,
     external_stop_id   VARCHAR(30) UNIQUE NOT NULL,   -- TAGO nodeid
-    city_code          SMALLINT NOT NULL,
+    city_code          INTEGER NOT NULL,
     stop_name          VARCHAR(100) NOT NULL
 );
 
@@ -46,5 +46,32 @@ CREATE TABLE route_stop (
     stop_id    BIGINT NOT NULL REFERENCES stop(id),
     updown_cd  SMALLINT NOT NULL,
     PRIMARY KEY (route_id, node_ord)
+);
+```
+
+## TOTP (Time-based One-Time Password)
+
+시간 기반으로 매 30초마다 바뀌는 6자리 코드를 서버와 OTP 앱(구글 OTP, 네이버 OTP 등)이 **같은 비밀키 + 같은 알고리즘**으로 각자 계산해서, 둘이 맞으면 인증하는 방식. 코드 자체는 네트워크로 전송되지 않고 양쪽이 독립 계산한다.
+
+SMS/카카오 OTP와 다른 점: SMS·카카오는 서버가 코드를 "생성해서 전송"하지만, TOTP는 서버가 코드를 전송하지 않고 **각자 계산한 값을 비교만** 한다. 그래서 문자 발송 비용 자체가 없다.
+
+### 왜 SMS/카카오 대신 TOTP인가
+
+- 카카오 알림톡: 사업자등록 + 비즈니스 채널 심사 필요 → 개인 포트폴리오 프로젝트는 신청 단계에서 막힘
+- SMS: 가입 시 소량 무료 포인트는 있어도 지속 무료 아님(건당 9~20원)
+- TOTP: **완전 무료, 외부 API/과금 의존 없음**, 은행·GitHub 등에서 쓰는 것과 동일한 표준 방식이라 "돈이 없어서 타협"이 아니라 "의도적으로 더 안전한 방식을 선택"했다고 설명 가능
+
+### 이 프로젝트에 적용한 방식
+
+관제 웹 로그인에 적용. `admin_user.totp_secret`에 Base32 인코딩된 비밀키를 저장해두고, 로그인 시 비밀번호 확인 후 OTP 앱이 보여주는 6자리 코드를 추가로 검증한다(JWT는 이 2단계를 통과해야 발급).
+
+```sql
+CREATE TABLE admin_user (
+    id               BIGSERIAL PRIMARY KEY,
+    username         VARCHAR(50) UNIQUE NOT NULL,
+    password_hash    VARCHAR(255) NOT NULL,
+    totp_secret      VARCHAR(64) NOT NULL,
+    totp_enabled_at  TIMESTAMPTZ,
+    created_at       TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 ```

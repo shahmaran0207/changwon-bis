@@ -220,3 +220,18 @@ CREATE TABLE safety_event (
     sms_sent_at    TIMESTAMPTZ
 );
 CREATE INDEX idx_safety_event_guardian ON safety_event (guardian_id, tag_time);
+
+-- =========================================================
+-- 6. 관제 인증
+-- =========================================================
+
+-- 카카오/SMS는 사업자등록·건당과금 없이는 사실상 불가능해서
+-- 완전 무료이면서 실무 표준인 TOTP(구글 OTP 앱 호환) 2단계 인증으로 결정.
+CREATE TABLE admin_user (
+    id               BIGSERIAL PRIMARY KEY,
+    username         VARCHAR(50) UNIQUE NOT NULL,
+    password_hash    VARCHAR(255) NOT NULL,
+    totp_secret      VARCHAR(64) NOT NULL,                 -- Base32 인코딩된 TOTP 시크릿
+    totp_enabled_at  TIMESTAMPTZ,                           -- NULL이면 아직 OTP 앱 등록 전(최초 로그인 시 설정 유도)
+    created_at       TIMESTAMPTZ NOT NULL DEFAULT now()
+);
