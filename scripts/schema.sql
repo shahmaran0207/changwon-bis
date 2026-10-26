@@ -3,6 +3,7 @@
 -- 표준노드링크 원본은 ITRF2000 Central Belt(TM, m) 좌표계이므로 적재 시 ST_Transform(..., 4326) 필수.
 
 CREATE EXTENSION IF NOT EXISTS postgis;
+CREATE EXTENSION IF NOT EXISTS pgrouting;
 
 -- =========================================================
 -- 1. 노선·정류소 도메인 (TAGO 기반, 정적 데이터)
@@ -171,12 +172,44 @@ CREATE TABLE road_link (
 );
 CREATE INDEX idx_road_link_geom ON road_link USING GIST (geom);
 
+-- pgr_dijkstra가 요구하는 edge 테이블 형식(id/source/target/cost)으로 맞춘 뷰.
+-- cost는 거리(m)가 아니라 "통행 소요시간"으로 둬서, 큰길(법정속도 높음)을 우선하는
+-- 경로가 나오게 한다 (버스는 실제로 최단거리가 아니라 큰길을 따라 다니기 때문).
+CREATE VIEW road_link_pgr AS
+SELECT
+    id,
+    f_node_id AS source,
+    t_node_id AS target,
+    length_m / NULLIF(max_speed_kmh, 0) AS cost   -- 작을수록 좋은 경로. 속도 0/NULL인 링크는 제외
+FROM road_link
+WHERE f_node_id IS NOT NULL AND t_node_id IS NOT NULL AND max_speed_kmh > 0;
+
 -- day_type: ITS 과거 데이터에서 평일 4일 / 토요일(공휴일 겹침) / 일요일 / 평일중 공휴일을
 -- 분리 수집했고, 실제로 공휴일 패턴이 평일과 다르게 나타나 4분류를 유지하기로 결정함.
 CREATE TYPE road_day_type AS ENUM ('WEEKDAY', 'SATURDAY', 'SUNDAY', 'HOLIDAY');
 CREATE TYPE time_bucket_type AS ENUM ('COMMUTE_AM', 'DAYTIME', 'COMMUTE_PM', 'NIGHT');
 
--- scripts/aggregate_traffic_speed.py 결과물을 적재하는 테이블.
+-- ITS 실시간 trafficInfo 호출 결과 원본 로그. 운영 중 지속 수집해서
+-- road_link_speed_stat을 매일 배치로 갱신하는 데 쓴다 (초기엔 과거 7일 집계로 시작,
+-- 운영하면서 쌓이는 만큼 자체 데이터로 점점 고도화되는 구조).
+CREATE TABLE road_link_speed_log (
+    id            BIGSERIAL,
+    link_id       BIGINT NOT NULL REFERENCES road_link(id),
+    speed_kmh     NUMERIC(5, 2) NOT NULL,
+    collected_at  TIMESTAMPTZ NOT NULL,
+    PRIMARY KEY (id, collected_at)
+) PARTITION BY RANGE (collected_at);
+CREATE INDEX idx_road_speed_log_link_time ON road_link_speed_log (link_id, collected_at);
+
+CREATE TABLE road_link_speed_log_202610 PARTITION OF road_link_speed_log
+    FOR VALUES FROM ('2026-10-01') TO ('2026-11-01');
+CREATE TABLE road_link_speed_log_202611 PARTITION OF road_link_speed_log
+    FOR VALUES FROM ('2026-11-01') TO ('2026-12-01');
+
+-- scripts/aggregate_traffic_speed.py(초기 적재) 및 매일 배치(운영 중 갱신)가 쓰는 집계 테이블.
+-- 매일 배치는 전날 road_link_speed_log를 day_type/time_bucket별로 묶어
+-- 기존 집계와 가중평균으로 합산한다:
+--   new_avg = (old_avg*old_count + today_avg*today_count) / (old_count+today_count)
 CREATE TABLE road_link_speed_stat (
     link_id        BIGINT NOT NULL REFERENCES road_link(id),
     city_code      INTEGER  NOT NULL,
