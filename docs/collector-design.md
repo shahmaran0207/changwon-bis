@@ -64,6 +64,31 @@ new_count = old_count + today_count
 
 노선/정류소 데이터는 TAGO 쪽에서 자주 바뀌지 않으므로, 상시 스케줄이 아니라 **노선 동기화 배치 직후 또는 관리자 수동 트리거**로 실행.
 
+## 4. 노선/정류소 TAGO 동기화 배치
+
+**트리거**: 매일 새벽(운행 없는 시간) 1회
+
+1. `getRouteNoList`로 창원/진주 현재 전체 노선 목록 조회, DB의 `route.external_route_id` 집합과 비교
+   - 신규 → route insert + `getRouteInfoIem`(상세)·`getRouteAcctoThrghSttnList`(정류소 순서) 호출해 적재
+   - TAGO 목록에서 사라짐 → **하드 삭제 금지**(과거 `bus_location_log`/`arrival_status`가 FK로 참조 중) → `deleted_at` 소프트 삭제
+   - 기존 노선 → 상세정보 갱신. **정류소 순서는 TAGO가 매번 전체 목록을 주므로 diff 없이 해당 route_id의 route_stop을 통째로 delete-and-reinsert** (부분 추적보다 실수 여지가 적음)
+2. 정류소 순서가 바뀐 노선은 `route_link_map`이 더는 안 맞으므로 맵매칭 재실행 대상으로 큐잉
+
+`stop`/`route`에 `deleted_at TIMESTAMPTZ` 컬럼 추가 (스키마 반영 완료, Docker로 재검증함). **모든 조회 API/배치는 `deleted_at IS NULL` 조건을 빠짐없이 걸어야 함** — 안 그러면 폐지된 노선/정류소가 검색 결과에 계속 나옴.
+
+## 5. 배차 이상·노선 이탈 감지 로직
+
+**배차 이상 (dispatch_anomaly)** — `route.interval_weekday_min`(또는 sat/sun) 기준치와 비교
+- `BUNCHING`: 같은 route_id+updown_cd에서 연속 두 차량이 동일 지점을 통과한 시간차가 **기준 배차간격의 30% 미만**
+- `GAP_TOO_LONG`: 시간차가 **기준 배차간격의 200% 이상**
+- 판정 주기: 5분마다 배치, 최근 `bus_location_log`에서 노선·방향별 차량 통과 시각 비교
+
+**노선 이탈 (route_deviation)**
+- 버스 현재 위치와 `route_line_view` 사이 거리를 `ST_Distance`로 계산, **150m 이상이면 이탈**
+- 판정 시점: 배치가 아니라 **TAGO 수집 직후 후처리 단계**에서 바로 체크
+
+임계값(30%/200%/150m)은 전부 설정값으로 분리, 실데이터 쌓이면 튜닝.
+
 ## 남은 작업
-- [ ] 노선/정류소 TAGO 동기화 배치(신규/변경/폐지 노선 반영) 상세 설계
-- [ ] 배차 이상·노선 이탈 감지 로직(임계값, 판정 주기) 상세 설계
+- [ ] 임계값 실데이터 기반 튜닝 (운영 시작 후)
+- [ ] 노선 동기화 배치의 TAGO API 호출 실패 시 부분 실패 처리(일부 노선만 갱신 실패했을 때 롤백 범위)

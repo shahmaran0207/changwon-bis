@@ -17,7 +17,8 @@ CREATE TABLE stop (
     stop_name         VARCHAR(100) NOT NULL,
     geom              geometry(Point, 4326) NOT NULL,
     created_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
-    updated_at        TIMESTAMPTZ NOT NULL DEFAULT now()
+    updated_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
+    deleted_at        TIMESTAMPTZ                           -- 소프트 삭제. TAGO 동기화 배치에서 폐지 정류소 처리용
 );
 CREATE INDEX idx_stop_geom ON stop USING GIST (geom);
 CREATE INDEX idx_stop_city ON stop (city_code);
@@ -37,7 +38,8 @@ CREATE TABLE route (
     interval_sat_min     SMALLINT,                         -- TAGO intervalsattime
     interval_sun_min     SMALLINT,                         -- TAGO intervalsuntime
     created_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
-    updated_at         TIMESTAMPTZ NOT NULL DEFAULT now()
+    updated_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
+    deleted_at         TIMESTAMPTZ                          -- 소프트 삭제. TAGO 동기화 배치에서 폐지 노선 처리용
 );
 CREATE INDEX idx_route_city ON route (city_code);
 CREATE INDEX idx_route_no ON route (route_no);
